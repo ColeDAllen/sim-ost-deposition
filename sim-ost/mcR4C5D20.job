@@ -1,0 +1,60 @@
+#!/bin/bash
+#$ -V                              # Inherit current environment
+#$ -cwd                            # Start job in submission directory
+#$ -N mcR4C5D20                 # Job Name
+#$ -j y                            # Combine stderr and stdout
+#$ -q MS,UI,CCOM                   # Queue
+#$ -o $JOB_NAME.$JOB_ID.log        # Name of output
+#$ -l h_rt=384:00:00               # Run Time
+#$ -l gpu=false                    # Use no GPU.
+#$ -pe smp 2                       # Use 1x physical CPUs
+top1='trans.xyz'
+top2='cis.xyz'
+
+ncores='1'
+mem='4G'
+export FFX_MEMORY="$mem"
+
+tstat='ADIABATIC'
+integ='VERLET'
+dt='2.0'
+ckpt='1.0'
+snaps='1.0'
+rpt='0.5'
+lam='1.0'
+nEquil='1000000'
+nSteps='20000000'
+mcSteps='5'
+platform='FFX'
+engine='FFX'
+temp='298.15'
+algo='OST'
+lamBinWidth='0.025'
+flBinWidth='0.2'
+
+# Relatively likely to change.
+tparm='1'
+tOff='6.0'
+biasMag='0.005'
+biasF='4'
+discreteL='true'
+
+# Post-processing options
+nBoot='5000'
+firstSnap='5000'
+
+ffxc Thermodynamics -Ddiscrete-lambda="$discreteL" -Dmc-ost-biasf="$biasF" -Dpj.nt='1' -Dlambda-bin-width="$lamBinWidth" -Dflambda-bin-width="$flBinWidth" -Dplatform="$platform" -Ddisable-neighbor-updates='true' --tth "$tOff" --bM "$biasMag" -b "$tstat" -i "$integ" -d "$dt" -k "$ckpt" -w "$snaps" -r "$rpt" -l "$lam" -Q "$nEquil" -n "$nSteps" -t "$temp" --tA "$algo" --tp "$tparm" --mc --mcMD "$mcSteps" "$top1" "$top2"
+
+# Post-process with the MostBar script
+sleep 30s
+arc1="$(echo "$top1" | sed -re 's/\.xyz$/.arc/')"
+arc2="$(echo "$top2" | sed -re 's/\.xyz$/.arc/')"
+
+ffxc MostBar -Ddiscrete-lambda="$discreteL" -Dpj.nt='1' -Dplatform="$platform" -Ddisable-neighbor-updates='true' -t "$temp" --bo "$nBoot" -s "$firstSnap" "$arc1" "$arc2" 1> mostbar.log 2>&1
+ffxc Histogram -Dpj.nt='1' -Ddiscrete-lambda="$discreteL" -p "$top1" 1> histo.log 2>&1
+
+# Extract key info into CSVs and compress the large .log and .arc files.
+export JAVA_OPTS="$JAVA_OPTS -Xmx${mem}"
+export GROOVY_OPTS="$GROOVY_OPTS -Xmx${mem}"
+ostHisto-v3.groovy 1> analysis.log 2>&1
+
